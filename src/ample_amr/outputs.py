@@ -61,8 +61,13 @@ def save_result_frames(
             total_decision_overhead_ms=("total_decision_overhead_ms", "mean"),
             slot_share=("slot_share", "mean"),
             payments_sum=("payments_sum", "mean"),
+            payment_robot_sum=("payment_robot_sum", "mean"),
+            payment_task_sum=("payment_task_sum", "mean"),
             node_compensation_sum=("node_compensation_sum", "mean"),
             average_externality=("average_externality", "mean"),
+            externality_mean=("externality_mean", "mean"),
+            externality_p95=("externality_p95", "mean"),
+            externality_max=("externality_max", "mean"),
             cluster_count=("cluster_count", "mean"),
             avg_cluster_size=("avg_cluster_size", "mean"),
             graph_cut=("graph_cut", "mean"),
@@ -82,7 +87,7 @@ def save_result_frames(
     sensitivity.to_csv(result_dir / RESULT_FILES["sensitivity_operation_modes"], index=False)
 
     if training_history is None:
-        training_history = pd.DataFrame(columns=["size_name", "episode", "reward", "loss", "epsilon"])
+        training_history = pd.DataFrame(columns=["size_name", "training_scenario", "episode", "reward", "loss", "epsilon"])
     training_history.to_csv(result_dir / RESULT_FILES["training_history"], index=False)
 
     return {

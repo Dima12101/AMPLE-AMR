@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from ample_amr.allocation import HeuristicAllocator, VCGLikeAllocator, build_candidates, build_node_budgets
 from ample_amr.environment import SimulationEnvironment
 from ample_amr.methods import METHOD_SPECS
@@ -118,6 +120,31 @@ def test_vcg_like_payments_are_nonnegative(experiment_config) -> None:
         step=0,
     )
     assert all(payment >= 0.0 for payment in result.payments_by_robot.values())
+
+
+def test_task_externality_payments_are_recorded_for_vcg(experiment_config) -> None:
+    scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
+    env = SimulationEnvironment(scenario, seed=17)
+    env._refresh_node_statistics()
+    tasks = [_build_long_task("task-a", env.robots[0].id), _build_long_task("task-b", env.robots[1].id)]
+    result = VCGLikeAllocator().allocate(
+        tasks=tasks,
+        robots={robot.id: robot for robot in env.robots},
+        nodes=env.nodes,
+        graph=env.graph,
+        scenario=scenario,
+        step=0,
+    )
+    step_row = env._build_step_row(tasks, [], result)
+    assert set(result.payments_by_task) == {task.id for task in tasks}
+    assert set(result.externality_by_task) == {task.id for task in tasks}
+    assigned_task_ids = set(result.task_to_node)
+    assert all(result.payments_by_task[task_id] >= 0.0 for task_id in assigned_task_ids)
+    assert all(result.externality_by_task[task_id] >= 0.0 for task_id in assigned_task_ids)
+    assert step_row["payment_task_sum"] == pytest.approx(sum(result.payments_by_task.values()))
+    for task in tasks:
+        if task.id in assigned_task_ids:
+            assert task.externality_estimate == pytest.approx(result.externality_by_task[task.id])
 
 
 def test_no_method_uses_qmix_without_allocation_layer() -> None:

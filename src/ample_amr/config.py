@@ -77,6 +77,7 @@ class QMIXConfig:
     batch_size: int
     target_update_interval: int
     training_episodes: int
+    training_scenarios: list[str]
     checkpoint_dir: str
 
 
@@ -346,6 +347,7 @@ def load_experiment_config(path: str | Path) -> ExperimentConfig:
         batch_size=int(qmix["batch_size"]),
         target_update_interval=int(qmix["target_update_interval"]),
         training_episodes=int(qmix["training_episodes"]),
+        training_scenarios=[str(name) for name in qmix.get("training_scenarios", ["stable_warehouse_load"])],
         checkpoint_dir=str(qmix["checkpoint_dir"]),
     )
     return ExperimentConfig(

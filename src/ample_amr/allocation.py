@@ -23,10 +23,12 @@ class AllocationResult:
     allocation_matrix: dict[str, str]
     task_to_node: dict[str, str]
     payments_by_robot: dict[str, float]
+    payments_by_task: dict[str, float]
+    externality_by_task: dict[str, float]
     compensation_by_node: dict[str, float]
     social_welfare: float
     dropped_tasks: list[str]
-    auction_stats: dict[str, float]
+    auction_stats: dict[str, object]
     allocation_time_ms: float
     policy_time_ms: float
     total_decision_time_ms: float
@@ -174,6 +176,8 @@ def apply_assignment_to_tasks(
     tasks_by_id: dict[str, Task],
     assignment: dict[str, CandidateAssignment],
     payments_by_robot: dict[str, float],
+    payments_by_task: dict[str, float],
+    externality_by_task: dict[str, float],
     compensation_by_node: dict[str, float],
 ) -> None:
     """Copy allocation outputs into task objects."""
@@ -202,7 +206,7 @@ def apply_assignment_to_tasks(
         compensation_total = compensation_by_node.get(candidate.node_id, 0.0)
         task.robot_payment = payment_total * safe_div(candidate.welfare, robot_assigned_totals[task.robot_id])
         task.node_compensation = compensation_total / max(1, node_assigned_counts[candidate.node_id])
-        task.externality_estimate = task.robot_payment
+        task.externality_estimate = externality_by_task.get(task_id, payments_by_task.get(task_id, 0.0))
 
 
 class HeuristicAllocator(BaseAllocator):
@@ -254,14 +258,25 @@ class HeuristicAllocator(BaseAllocator):
             budgets[chosen.node_id] = budgets[chosen.node_id].apply(chosen)
             assignment[task.id] = chosen
         payments_by_robot = {task.robot_id: 0.0 for task in tasks}
+        payments_by_task = {task.id: 0.0 for task in tasks}
+        externality_by_task = {task.id: 0.0 for task in tasks}
         compensation_by_node = {node.id: 0.0 for node in nodes}
-        apply_assignment_to_tasks(tasks_by_id, assignment, payments_by_robot, compensation_by_node)
+        apply_assignment_to_tasks(
+            tasks_by_id,
+            assignment,
+            payments_by_robot,
+            payments_by_task,
+            externality_by_task,
+            compensation_by_node,
+        )
         social_welfare = compute_social_welfare(list(tasks_by_id.values()))
         allocation_time_ms = (perf_counter() - start) * 1000.0
         return AllocationResult(
             allocation_matrix={task_id: candidate.node_id for task_id, candidate in assignment.items()},
             task_to_node={task_id: candidate.node_id for task_id, candidate in assignment.items()},
             payments_by_robot=payments_by_robot,
+            payments_by_task=payments_by_task,
+            externality_by_task=externality_by_task,
             compensation_by_node=compensation_by_node,
             social_welfare=social_welfare,
             dropped_tasks=dropped,
@@ -269,6 +284,7 @@ class HeuristicAllocator(BaseAllocator):
                 "candidate_count": float(sum(len(value) for value in candidates.values())),
                 "allocated_task_count": float(len(assignment)),
                 "policy": self.policy,
+                "robot_payment_mode": "heuristic_zero",
             },
             allocation_time_ms=allocation_time_ms,
             policy_time_ms=policy_time_ms,
@@ -309,9 +325,38 @@ class VCGLikeAllocator(BaseAllocator):
         tasks_by_id = {task.id: task for task in tasks}
         candidates, max_positive_welfare = build_candidates(tasks, robots, nodes, graph, scenario, step)
         outcome = self._solve(tasks, budgets, candidates, max_positive_welfare)
-        payments_by_robot = self._compute_payments(tasks, robots, nodes, scenario, candidates, budgets, outcome)
-        compensation_by_node = self._compute_compensation(tasks, nodes, scenario, candidates, budgets, outcome)
-        apply_assignment_to_tasks(tasks_by_id, outcome.assignment, payments_by_robot, compensation_by_node)
+        payments_by_robot = self._compute_payments(
+            tasks,
+            robots,
+            scenario,
+            candidates,
+            budgets,
+            max_positive_welfare,
+            outcome,
+        )
+        payments_by_task, externality_by_task = self._compute_task_externalities(
+            tasks,
+            candidates,
+            budgets,
+            max_positive_welfare,
+            outcome,
+        )
+        compensation_by_node = self._compute_compensation(
+            tasks,
+            nodes,
+            candidates,
+            budgets,
+            max_positive_welfare,
+            outcome,
+        )
+        apply_assignment_to_tasks(
+            tasks_by_id,
+            outcome.assignment,
+            payments_by_robot,
+            payments_by_task,
+            externality_by_task,
+            compensation_by_node,
+        )
         for task in tasks:
             if task.id not in outcome.assignment:
                 task.status = "dropped"
@@ -321,6 +366,8 @@ class VCGLikeAllocator(BaseAllocator):
             allocation_matrix={task_id: candidate.node_id for task_id, candidate in outcome.assignment.items()},
             task_to_node={task_id: candidate.node_id for task_id, candidate in outcome.assignment.items()},
             payments_by_robot=payments_by_robot,
+            payments_by_task=payments_by_task,
+            externality_by_task=externality_by_task,
             compensation_by_node=compensation_by_node,
             social_welfare=social_welfare,
             dropped_tasks=[task.id for task in tasks if task.id not in outcome.assignment],
@@ -330,6 +377,7 @@ class VCGLikeAllocator(BaseAllocator):
                 "explored_states": float(outcome.explored_states),
                 "pruned_states": float(outcome.pruned_states),
                 "exact": 1.0,
+                "robot_payment_mode": "robot_vcg_like",
             },
             allocation_time_ms=allocation_time_ms,
             policy_time_ms=policy_time_ms,
@@ -392,36 +440,57 @@ class VCGLikeAllocator(BaseAllocator):
         self,
         tasks: list[Task],
         robots: dict[str, Robot],
-        nodes: list[EdgeNode],
         scenario: WarehouseScenarioConfig,
         candidates: dict[str, list[CandidateAssignment]],
         budgets: dict[str, NodeBudget],
+        max_positive_welfare: dict[str, float],
         optimal: SolverOutcome,
     ) -> dict[str, float]:
         payments = {task.robot_id: 0.0 for task in tasks}
+        task_lookup = tasks_by_id(tasks)
         assigned_welfare_by_robot = defaultdict(float)
         for candidate in optimal.assignment.values():
-            assigned_welfare_by_robot[tasks_by_id(tasks)[candidate.task_id].robot_id] += candidate.welfare
+            assigned_welfare_by_robot[task_lookup[candidate.task_id].robot_id] += candidate.welfare
         for robot_id in sorted({task.robot_id for task in tasks}):
             reduced_tasks = [task for task in tasks if task.robot_id != robot_id]
             reduced_candidates = {task.id: candidates[task.id] for task in reduced_tasks}
-            reduced_bound = {
-                task.id: (reduced_candidates[task.id][0].welfare if reduced_candidates[task.id] else 0.0)
-                for task in reduced_tasks
-            }
+            reduced_bound = {task.id: max_positive_welfare.get(task.id, 0.0) for task in reduced_tasks}
             without_robot = self._solve(reduced_tasks, budgets, reduced_candidates, reduced_bound)
             welfare_of_others_with_robot = optimal.welfare - assigned_welfare_by_robot.get(robot_id, 0.0)
             payment = max(0.0, without_robot.welfare - welfare_of_others_with_robot)
             payments[robot_id] = payment
         return payments
 
+    def _compute_task_externalities(
+        self,
+        tasks: list[Task],
+        candidates: dict[str, list[CandidateAssignment]],
+        budgets: dict[str, NodeBudget],
+        max_positive_welfare: dict[str, float],
+        optimal: SolverOutcome,
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        payments_by_task = {task.id: 0.0 for task in tasks}
+        externality_by_task = {task.id: 0.0 for task in tasks}
+        for task in tasks:
+            assigned = optimal.assignment.get(task.id)
+            if assigned is None:
+                continue
+            reduced_tasks = [candidate_task for candidate_task in tasks if candidate_task.id != task.id]
+            reduced_candidates = {candidate_task.id: candidates[candidate_task.id] for candidate_task in reduced_tasks}
+            reduced_bound = {candidate_task.id: max_positive_welfare.get(candidate_task.id, 0.0) for candidate_task in reduced_tasks}
+            without_task = self._solve(reduced_tasks, budgets, reduced_candidates, reduced_bound)
+            payment = max(0.0, without_task.welfare - (optimal.welfare - assigned.welfare))
+            payments_by_task[task.id] = payment
+            externality_by_task[task.id] = payment
+        return payments_by_task, externality_by_task
+
     def _compute_compensation(
         self,
         tasks: list[Task],
         nodes: list[EdgeNode],
-        scenario: WarehouseScenarioConfig,
         candidates: dict[str, list[CandidateAssignment]],
         budgets: dict[str, NodeBudget],
+        max_positive_welfare: dict[str, float],
         optimal: SolverOutcome,
     ) -> dict[str, float]:
         compensation = {node.id: 0.0 for node in nodes}
@@ -433,10 +502,7 @@ class VCGLikeAllocator(BaseAllocator):
                 task.id: [candidate for candidate in task_candidates if candidate.node_id != node_id]
                 for task, task_candidates in ((task, candidates[task.id]) for task in tasks)
             }
-            reduced_bound = {
-                task.id: (reduced_candidates[task.id][0].welfare if reduced_candidates[task.id] else 0.0)
-                for task in tasks
-            }
+            reduced_bound = {task.id: max_positive_welfare.get(task.id, 0.0) for task in tasks}
             without_node = self._solve(tasks, reduced_budgets, reduced_candidates, reduced_bound)
             compensation[node_id] = max(0.0, optimal.welfare - without_node.welfare)
         return compensation
@@ -466,10 +532,17 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
                 allocation_matrix={},
                 task_to_node={},
                 payments_by_robot={},
+                payments_by_task={},
+                externality_by_task={},
                 compensation_by_node={node.id: 0.0 for node in nodes},
                 social_welfare=0.0,
                 dropped_tasks=[],
-                auction_stats={"cluster_count": 0.0, "avg_cluster_size": 0.0, "graph_cut": 0.0},
+                auction_stats={
+                    "cluster_count": 0.0,
+                    "avg_cluster_size": 0.0,
+                    "graph_cut": 0.0,
+                    "robot_payment_mode": "sum_local_robot_vcg_like",
+                },
                 allocation_time_ms=0.0,
                 policy_time_ms=policy_time_ms,
                 total_decision_time_ms=policy_time_ms,
@@ -482,7 +555,9 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
         cluster_nodes = self._assign_nodes_to_clusters(communities, participating_robots, nodes, graph, step)
 
         combined_assignment: dict[str, str] = {}
-        payments_by_robot: dict[str, float] = {}
+        payments_by_robot: dict[str, float] = {task.robot_id: 0.0 for task in tasks}
+        payments_by_task: dict[str, float] = {task.id: 0.0 for task in tasks}
+        externality_by_task: dict[str, float] = {task.id: 0.0 for task in tasks}
         compensation_by_node: dict[str, float] = {node.id: 0.0 for node in nodes}
         dropped_tasks: list[str] = []
         cluster_welfare = 0.0
@@ -515,6 +590,10 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
             dropped_tasks.extend(local_result.dropped_tasks)
             for robot_id, payment in local_result.payments_by_robot.items():
                 payments_by_robot[robot_id] = payments_by_robot.get(robot_id, 0.0) + payment
+            for task_id, payment in local_result.payments_by_task.items():
+                payments_by_task[task_id] = payments_by_task.get(task_id, 0.0) + payment
+            for task_id, externality in local_result.externality_by_task.items():
+                externality_by_task[task_id] = externality_by_task.get(task_id, 0.0) + externality
             for node_id, compensation in local_result.compensation_by_node.items():
                 compensation_by_node[node_id] = compensation_by_node.get(node_id, 0.0) + compensation
 
@@ -528,6 +607,8 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
             allocation_matrix=dict(combined_assignment),
             task_to_node=dict(combined_assignment),
             payments_by_robot=payments_by_robot,
+            payments_by_task=payments_by_task,
+            externality_by_task=externality_by_task,
             compensation_by_node=compensation_by_node,
             social_welfare=cluster_welfare,
             dropped_tasks=sorted(set(dropped_tasks)),
@@ -537,6 +618,7 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
                 "graph_cut": graph_cut,
                 "welfare_loss_vs_global": welfare_loss_vs_global,
                 "local_allocation_time_mean_ms": sum(local_times) / len(local_times) if local_times else 0.0,
+                "robot_payment_mode": "sum_local_robot_vcg_like",
             },
             allocation_time_ms=allocation_time_ms,
             policy_time_ms=policy_time_ms,

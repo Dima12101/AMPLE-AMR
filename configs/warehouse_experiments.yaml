@@ -181,6 +181,8 @@ qmix:
   batch_size: 32
   target_update_interval: 80
   training_episodes: 24
+  training_scenarios:
+    - stable_warehouse_load
   checkpoint_dir: experiments/checkpoints
 
 scenarios:

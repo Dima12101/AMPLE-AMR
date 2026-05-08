@@ -472,7 +472,13 @@ class SimulationEnvironment:
             for node in self.nodes
         ]
         overload_count = sum(1 for value in node_total_utilization if value > 1.0)
-        payments_sum = sum(allocation_result.payments_by_robot.values())
+        assigned_externalities = [
+            allocation_result.externality_by_task.get(task.id, task.externality_estimate)
+            for task in new_tasks
+            if task.assigned_node_id
+        ]
+        payment_robot_sum = sum(allocation_result.payments_by_robot.values())
+        payment_task_sum = sum(allocation_result.payments_by_task.values())
         node_compensation_sum = sum(allocation_result.compensation_by_node.values())
         mode_counts = {
             f"mode_{mode_name}": float(sum(1 for node in self.nodes if node.current_operation_mode == mode_name))
@@ -498,12 +504,14 @@ class SimulationEnvironment:
             "policy_inference_time_ms": allocation_result.policy_time_ms,
             "total_decision_overhead_ms": allocation_result.total_decision_time_ms,
             "slot_share": allocation_result.slot_share,
-            "payments_sum": payments_sum,
+            "payments_sum": payment_robot_sum,
+            "payment_robot_sum": payment_robot_sum,
+            "payment_task_sum": payment_task_sum,
             "node_compensation_sum": node_compensation_sum,
-            "average_externality": safe_div(
-                sum(task.externality_estimate for task in new_tasks if task.assigned_node_id),
-                max(1, sum(1 for task in new_tasks if task.assigned_node_id)),
-            ),
+            "average_externality": float(np.mean(assigned_externalities)) if assigned_externalities else 0.0,
+            "externality_mean": float(np.mean(assigned_externalities)) if assigned_externalities else 0.0,
+            "externality_p95": percentile(assigned_externalities, 95.0),
+            "externality_max": max(assigned_externalities, default=0.0),
             "cluster_count": allocation_result.auction_stats.get("cluster_count", 0.0),
             "avg_cluster_size": allocation_result.auction_stats.get("avg_cluster_size", 0.0),
             "graph_cut": allocation_result.auction_stats.get("graph_cut", 0.0),
@@ -535,6 +543,8 @@ class SimulationEnvironment:
         violated_tasks = [self.tasks_by_id[task_id] for task_id in self.violated_task_ids]
         all_terminal_tasks = completed_tasks + violated_tasks
         latencies = [(task.finish_time or self.current_time_ms) - task.arrival_time for task in all_terminal_tasks]
+        assigned_tasks = [task for task in self.tasks_by_id.values() if task.assigned_node_id]
+        assigned_externalities = [task.externality_estimate for task in assigned_tasks]
         summary = {
             "scenario": self.scenario.scenario_name,
             "scenario_size": self.scenario.size_name,
@@ -556,8 +566,13 @@ class SimulationEnvironment:
             "total_decision_overhead_ms": float(np.mean([row["total_decision_overhead_ms"] for row in step_rows])) if step_rows else 0.0,
             "slot_share": float(np.mean([row["slot_share"] for row in step_rows])) if step_rows else 0.0,
             "payments_sum": float(np.sum([row["payments_sum"] for row in step_rows])) if step_rows else 0.0,
+            "payment_robot_sum": float(np.sum([row["payment_robot_sum"] for row in step_rows])) if step_rows else 0.0,
+            "payment_task_sum": float(np.sum([row["payment_task_sum"] for row in step_rows])) if step_rows else 0.0,
             "node_compensation_sum": float(np.sum([row["node_compensation_sum"] for row in step_rows])) if step_rows else 0.0,
-            "average_externality": float(np.mean([row["average_externality"] for row in step_rows])) if step_rows else 0.0,
+            "average_externality": float(np.mean(assigned_externalities)) if assigned_externalities else 0.0,
+            "externality_mean": float(np.mean(assigned_externalities)) if assigned_externalities else 0.0,
+            "externality_p95": percentile(assigned_externalities, 95.0),
+            "externality_max": max(assigned_externalities, default=0.0),
             "cluster_count": float(np.mean([row["cluster_count"] for row in step_rows])) if step_rows else 0.0,
             "avg_cluster_size": float(np.mean([row["avg_cluster_size"] for row in step_rows])) if step_rows else 0.0,
             "graph_cut": float(np.mean([row["graph_cut"] for row in step_rows])) if step_rows else 0.0,

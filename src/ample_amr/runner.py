@@ -117,22 +117,37 @@ class ExperimentRunner:
         history_rows: list[dict[str, float | str]] = []
         episodes = min(4, self.experiment_config.qmix.training_episodes) if quick else self.experiment_config.qmix.training_episodes
         allocator = build_allocator("ample_amr")
+        training_scenarios = self._training_scenario_names()
         for size_name in sorted(size_names):
-            training_scenario = self.experiment_config.resolve_scenario(
-                "stable_warehouse_load",
-                size_override=size_name,
-                quick=quick,
-            )
+            resolved_training_scenarios = [
+                self.experiment_config.resolve_scenario(scenario_name, size_override=size_name, quick=quick)
+                for scenario_name in training_scenarios
+            ]
+            controller_scenario = resolved_training_scenarios[0]
             checkpoint_path = Path(self.experiment_config.qmix.checkpoint_dir) / f"qmix_{size_name}.pt"
-            controller = QMIXModeController(training_scenario, self.experiment_config.qmix, checkpoint_path, seed)
+            controller = QMIXModeController(controller_scenario, self.experiment_config.qmix, checkpoint_path, seed)
             history = controller.train(
                 allocator=allocator,
-                env_factory=lambda episode_seed, scenario=training_scenario: SimulationEnvironment(scenario, episode_seed),
+                env_factory=lambda episode_seed, scenarios=resolved_training_scenarios, base_seed=seed: SimulationEnvironment(
+                    scenarios[(episode_seed - base_seed) % len(scenarios)],
+                    episode_seed,
+                ),
                 episodes=episodes,
             )
             for row in history:
-                history_rows.append({"size_name": size_name, **row})
+                scenario_index = int(row["episode"]) % len(training_scenarios)
+                history_rows.append(
+                    {
+                        "size_name": size_name,
+                        "training_scenario": training_scenarios[scenario_index],
+                        **row,
+                    }
+                )
         return pd.DataFrame(history_rows)
+
+    def _training_scenario_names(self) -> list[str]:
+        training_scenarios = [name for name in self.experiment_config.qmix.training_scenarios if name]
+        return training_scenarios or ["stable_warehouse_load"]
 
     def _scenario_size_names(self, scenario_name: str, scenario_size: str | None) -> list[str]:
         if scenario_name == "scalability_sweep":

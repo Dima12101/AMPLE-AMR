@@ -9,6 +9,7 @@ The repository implements:
 - a configurable warehouse AMR simulation environment;
 - a domain model for robots, tasks, edge nodes, access points, and network state;
 - three allocation layers: heuristic, VCG-like, and clustered VCG-like;
+- robot-level VCG-like payments together with task-level diagnostic externalities;
 - a QMIX-based controller for **edge node operation modes only**;
 - experiment orchestration, CSV export, plots, and LaTeX tables;
 - unit and integration tests for reproducibility and core constraints.
@@ -22,6 +23,8 @@ This prototype follows the dissertation constraints explicitly:
 - **Task allocation is always performed by a separate allocation layer**:
   heuristic, VCG-like, or clustered VCG-like.
 - There is **no "QMIX only" mode** without an allocation layer.
+- The VCG-like layer keeps **robot-level payments** for compatibility and
+  exposes **task-level diagnostic externalities** for analysis.
 - `C-AMPLE-AMR` uses clustering for localized allocation, but does **not**
   implement cluster leader/orchestrator selection.
 
@@ -61,6 +64,10 @@ The scale presets are defined in
 - `scalability_sweep`
 - `clustered_vs_global`
 - `sensitivity_operation_modes`
+
+QMIX training defaults to `stable_warehouse_load`. To train on a scenario
+mixture, set `qmix.training_scenarios` in
+[`configs/warehouse_experiments.yaml`](configs/warehouse_experiments.yaml).
 
 ## Repository layout
 
@@ -187,6 +194,10 @@ After a full run the framework writes:
 - `experiments/results/sensitivity_operation_modes.csv`
 - `experiments/results/training_history.csv`
 
+Step-level and episode-level CSV outputs also include task-externality
+diagnostics such as `externality_mean`, `externality_p95`,
+`externality_max`, `payment_robot_sum`, and `payment_task_sum`.
+
 ### Plots
 
 - `experiments/results/welfare_by_scenario.{png,pdf}`
@@ -229,5 +240,7 @@ pytest -q
   domain, while the AMPLE-AMR formulation itself is broader than this domain.
 - The default heuristic baseline is `greedy_net_welfare`.
 - The VCG-like allocator is deterministic for a fixed seed.
+- Task-level externalities are intended for CSV diagnostics and dissertation
+  analysis rather than as standalone market payments.
 - The clustered allocator is intended as a scalability mechanism, not as a
   universal replacement for global allocation.
