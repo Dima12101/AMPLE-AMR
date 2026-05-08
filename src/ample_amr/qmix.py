@@ -133,6 +133,7 @@ class QMIXModeController:
         qmix_config: QMIXConfig,
         checkpoint_path: str | Path,
         seed: int,
+        load_checkpoint: bool = True,
     ) -> None:
         set_global_seed(seed)
         torch.set_num_threads(1)
@@ -161,7 +162,7 @@ class QMIXModeController:
         self.training_history: list[dict[str, float]] = []
         self.target_agent_network.load_state_dict(self.agent_network.state_dict())
         self.target_mixing_network.load_state_dict(self.mixing_network.state_dict())
-        if self.checkpoint_path.exists():
+        if load_checkpoint and self.checkpoint_path.exists():
             self.load()
 
     def select_modes(
@@ -204,7 +205,7 @@ class QMIXModeController:
                 node_ids = [node.id for node in env.nodes]
                 mode_selection, _ = self.select_modes(observations, global_state, node_ids, explore=True)
                 action_indices = np.asarray([self.mode_names.index(mode_selection[node_id]) for node_id in node_ids], dtype=np.int64)
-                transition = env.step(mode_selection, allocator, policy_time_ms=0.0)
+                transition = env.step(mode_selection, allocator, policy_time_ms=0.0, compute_pricing=False)
                 replay_transition = ReplayTransition(
                     observations=np.asarray(observations, dtype=np.float32),
                     state=np.asarray(global_state, dtype=np.float32),

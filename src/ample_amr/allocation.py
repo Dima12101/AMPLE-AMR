@@ -15,6 +15,9 @@ from .network import NetworkGraph
 from .utility import compute_social_welfare, estimate_network_time, estimate_processing_time, evaluate_cost, evaluate_utility
 from .utils import safe_div
 
+EXACT_TASK_EXTERNALITY_MAX_TASKS = 10
+EXACT_TASK_EXTERNALITY_MAX_NODES = 6
+
 
 @dataclass
 class AllocationResult:
@@ -89,6 +92,7 @@ class BaseAllocator(ABC):
         step: int,
         policy_time_ms: float = 0.0,
         global_reference_welfare: float | None = None,
+        compute_pricing: bool = True,
     ) -> AllocationResult:
         """Allocate tasks to nodes."""
 
@@ -179,6 +183,9 @@ def apply_assignment_to_tasks(
     payments_by_task: dict[str, float],
     externality_by_task: dict[str, float],
     compensation_by_node: dict[str, float],
+    assignment_context_by_node: dict[str, dict[str, float]],
+    task_payment_mode: str,
+    task_externality_mode: str,
 ) -> None:
     """Copy allocation outputs into task objects."""
 
@@ -202,11 +209,45 @@ def apply_assignment_to_tasks(
         task.utility = candidate.utility
         task.cost = candidate.cost
         task.welfare_contribution = candidate.welfare
+        assignment_context = assignment_context_by_node.get(candidate.node_id, {})
+        task_payment = payments_by_task.get(task_id, 0.0)
+        task_externality = externality_by_task.get(task_id, task_payment)
         payment_total = payments_by_robot.get(task.robot_id, 0.0)
         compensation_total = compensation_by_node.get(candidate.node_id, 0.0)
         task.robot_payment = payment_total * safe_div(candidate.welfare, robot_assigned_totals[task.robot_id])
         task.node_compensation = compensation_total / max(1, node_assigned_counts[candidate.node_id])
-        task.externality_estimate = externality_by_task.get(task_id, payments_by_task.get(task_id, 0.0))
+        task.externality_estimate = task_externality
+        task.metadata["assignment_latency_ms"] = candidate.total_latency_ms
+        task.metadata["node_utilization_at_assignment"] = assignment_context.get("node_utilization_at_assignment", 0.0)
+        task.metadata["queue_length_at_assignment"] = assignment_context.get("queue_length_at_assignment", 0.0)
+        task.metadata["task_payment_mode"] = task_payment_mode
+        task.metadata["task_externality_mode"] = task_externality_mode
+        task.metadata["task_payment_effective"] = task_payment
+        task.metadata["task_externality_effective"] = task_externality
+        task.metadata["task_payment"] = task_payment if task_payment_mode == "exact" else float("nan")
+        task.metadata["task_externality"] = task_externality if task_externality_mode == "exact" else float("nan")
+        task.metadata["approx_task_payment"] = task_payment if task_payment_mode != "exact" else float("nan")
+        task.metadata["approx_task_externality"] = task_externality if task_externality_mode != "exact" else float("nan")
+
+
+def build_assignment_context(nodes: list[EdgeNode]) -> dict[str, dict[str, float]]:
+    """Capture node-side diagnostics used for task-level experiment outputs."""
+
+    return {
+        node.id: {
+            "node_utilization_at_assignment": float(node.last_auction_stats.get("exposed_capacity_utilization", 0.0)),
+            "queue_length_at_assignment": float(len(node.queue)),
+        }
+        for node in nodes
+    }
+
+
+def select_task_externality_mode(tasks: list[Task], nodes: list[EdgeNode]) -> str:
+    """Choose whether to use exact or approximate task-level diagnostics."""
+
+    if len(tasks) <= EXACT_TASK_EXTERNALITY_MAX_TASKS and len(nodes) <= EXACT_TASK_EXTERNALITY_MAX_NODES:
+        return "exact"
+    return "approx_proportional_robot_payment"
 
 
 class HeuristicAllocator(BaseAllocator):
@@ -226,11 +267,13 @@ class HeuristicAllocator(BaseAllocator):
         step: int,
         policy_time_ms: float = 0.0,
         global_reference_welfare: float | None = None,
+        compute_pricing: bool = True,
     ) -> AllocationResult:
         start = perf_counter()
         budgets = build_node_budgets(nodes, scenario)
         tasks_by_id = {task.id: task for task in tasks}
         candidates, _ = build_candidates(tasks, robots, nodes, graph, scenario, step)
+        assignment_context = build_assignment_context(nodes)
         ordered_tasks = sorted(
             tasks,
             key=lambda task: (-int(task.hard_deadline), task.deadline_ms, -task.priority, task.id),
@@ -268,6 +311,9 @@ class HeuristicAllocator(BaseAllocator):
             payments_by_task,
             externality_by_task,
             compensation_by_node,
+            assignment_context,
+            "heuristic_zero",
+            "heuristic_zero",
         )
         social_welfare = compute_social_welfare(list(tasks_by_id.values()))
         allocation_time_ms = (perf_counter() - start) * 1000.0
@@ -285,6 +331,8 @@ class HeuristicAllocator(BaseAllocator):
                 "allocated_task_count": float(len(assignment)),
                 "policy": self.policy,
                 "robot_payment_mode": "heuristic_zero",
+                "task_payment_mode": "heuristic_zero",
+                "task_externality_mode": "heuristic_zero",
             },
             allocation_time_ms=allocation_time_ms,
             policy_time_ms=policy_time_ms,
@@ -319,36 +367,55 @@ class VCGLikeAllocator(BaseAllocator):
         step: int,
         policy_time_ms: float = 0.0,
         global_reference_welfare: float | None = None,
+        compute_pricing: bool = True,
     ) -> AllocationResult:
         start = perf_counter()
         budgets = build_node_budgets(nodes, scenario)
         tasks_by_id = {task.id: task for task in tasks}
         candidates, max_positive_welfare = build_candidates(tasks, robots, nodes, graph, scenario, step)
+        assignment_context = build_assignment_context(nodes)
         outcome = self._solve(tasks, budgets, candidates, max_positive_welfare)
-        payments_by_robot = self._compute_payments(
-            tasks,
-            robots,
-            scenario,
-            candidates,
-            budgets,
-            max_positive_welfare,
-            outcome,
-        )
-        payments_by_task, externality_by_task = self._compute_task_externalities(
-            tasks,
-            candidates,
-            budgets,
-            max_positive_welfare,
-            outcome,
-        )
-        compensation_by_node = self._compute_compensation(
-            tasks,
-            nodes,
-            candidates,
-            budgets,
-            max_positive_welfare,
-            outcome,
-        )
+        if compute_pricing:
+            payments_by_robot = self._compute_payments(
+                tasks,
+                robots,
+                scenario,
+                candidates,
+                budgets,
+                max_positive_welfare,
+                outcome,
+            )
+            task_externality_mode = select_task_externality_mode(tasks, nodes)
+            task_payment_mode = task_externality_mode
+            if task_externality_mode == "exact":
+                payments_by_task, externality_by_task = self._compute_task_externalities(
+                    tasks,
+                    candidates,
+                    budgets,
+                    max_positive_welfare,
+                    outcome,
+                )
+            else:
+                payments_by_task, externality_by_task = self._approximate_task_externalities(
+                    tasks,
+                    payments_by_robot,
+                    outcome,
+                )
+            compensation_by_node = self._compute_compensation(
+                tasks,
+                nodes,
+                candidates,
+                budgets,
+                max_positive_welfare,
+                outcome,
+            )
+        else:
+            payments_by_robot = {task.robot_id: 0.0 for task in tasks}
+            payments_by_task = {task.id: 0.0 for task in tasks}
+            externality_by_task = {task.id: 0.0 for task in tasks}
+            compensation_by_node = {node.id: 0.0 for node in nodes}
+            task_payment_mode = "skipped_for_training"
+            task_externality_mode = "skipped_for_training"
         apply_assignment_to_tasks(
             tasks_by_id,
             outcome.assignment,
@@ -356,6 +423,9 @@ class VCGLikeAllocator(BaseAllocator):
             payments_by_task,
             externality_by_task,
             compensation_by_node,
+            assignment_context,
+            task_payment_mode,
+            task_externality_mode,
         )
         for task in tasks:
             if task.id not in outcome.assignment:
@@ -377,7 +447,9 @@ class VCGLikeAllocator(BaseAllocator):
                 "explored_states": float(outcome.explored_states),
                 "pruned_states": float(outcome.pruned_states),
                 "exact": 1.0,
-                "robot_payment_mode": "robot_vcg_like",
+                "robot_payment_mode": "robot_vcg_like" if compute_pricing else "skipped_for_training",
+                "task_payment_mode": task_payment_mode,
+                "task_externality_mode": task_externality_mode,
             },
             allocation_time_ms=allocation_time_ms,
             policy_time_ms=policy_time_ms,
@@ -461,6 +533,25 @@ class VCGLikeAllocator(BaseAllocator):
             payments[robot_id] = payment
         return payments
 
+    def _approximate_task_externalities(
+        self,
+        tasks: list[Task],
+        payments_by_robot: dict[str, float],
+        optimal: SolverOutcome,
+    ) -> tuple[dict[str, float], dict[str, float]]:
+        payments_by_task = {task.id: 0.0 for task in tasks}
+        externality_by_task = {task.id: 0.0 for task in tasks}
+        task_lookup = tasks_by_id(tasks)
+        assigned_welfare_by_robot = defaultdict(float)
+        for candidate in optimal.assignment.values():
+            assigned_welfare_by_robot[task_lookup[candidate.task_id].robot_id] += candidate.welfare
+        for task_id, candidate in optimal.assignment.items():
+            robot_id = task_lookup[task_id].robot_id
+            payment = payments_by_robot.get(robot_id, 0.0) * safe_div(candidate.welfare, assigned_welfare_by_robot[robot_id])
+            payments_by_task[task_id] = payment
+            externality_by_task[task_id] = payment
+        return payments_by_task, externality_by_task
+
     def _compute_task_externalities(
         self,
         tasks: list[Task],
@@ -525,6 +616,7 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
         step: int,
         policy_time_ms: float = 0.0,
         global_reference_welfare: float | None = None,
+        compute_pricing: bool = True,
     ) -> AllocationResult:
         start = perf_counter()
         if not tasks:
@@ -542,6 +634,8 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
                     "avg_cluster_size": 0.0,
                     "graph_cut": 0.0,
                     "robot_payment_mode": "sum_local_robot_vcg_like",
+                    "task_payment_mode": "sum_local_task_diagnostics",
+                    "task_externality_mode": "sum_local_task_diagnostics",
                 },
                 allocation_time_ms=0.0,
                 policy_time_ms=policy_time_ms,
@@ -583,6 +677,7 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
                 scenario=scenario,
                 step=step,
                 policy_time_ms=0.0,
+                compute_pricing=compute_pricing,
             )
             local_times.append(local_result.allocation_time_ms)
             cluster_welfare += local_result.social_welfare
@@ -618,7 +713,9 @@ class ClusteredVCGLikeAllocator(BaseAllocator):
                 "graph_cut": graph_cut,
                 "welfare_loss_vs_global": welfare_loss_vs_global,
                 "local_allocation_time_mean_ms": sum(local_times) / len(local_times) if local_times else 0.0,
-                "robot_payment_mode": "sum_local_robot_vcg_like",
+                "robot_payment_mode": "sum_local_robot_vcg_like" if compute_pricing else "skipped_for_training",
+                "task_payment_mode": "local_mixed_task_diagnostics" if compute_pricing else "skipped_for_training",
+                "task_externality_mode": "local_mixed_task_diagnostics" if compute_pricing else "skipped_for_training",
             },
             allocation_time_ms=allocation_time_ms,
             policy_time_ms=policy_time_ms,

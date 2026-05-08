@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
+import ample_amr.allocation as allocation_module
 from ample_amr.allocation import HeuristicAllocator, VCGLikeAllocator, build_candidates, build_node_budgets
+from ample_amr.domain import Task
 from ample_amr.environment import SimulationEnvironment
 from ample_amr.methods import METHOD_SPECS
 from ample_amr.utility import estimate_network_time, estimate_processing_time
-from ample_amr.domain import Task
 
 
 def _build_long_task(task_id: str, robot_id: str) -> Task:
@@ -145,6 +148,60 @@ def test_task_externality_payments_are_recorded_for_vcg(experiment_config) -> No
     for task in tasks:
         if task.id in assigned_task_ids:
             assert task.externality_estimate == pytest.approx(result.externality_by_task[task.id])
+
+
+def test_vcg_like_allocator_falls_back_to_approx_task_externalities_when_exact_mode_is_disabled(
+    experiment_config,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(allocation_module, "EXACT_TASK_EXTERNALITY_MAX_TASKS", 1)
+    scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
+    env = SimulationEnvironment(scenario, seed=23)
+    env._refresh_node_statistics()
+    tasks = [_build_long_task(f"task-{index}", env.robots[index].id) for index in range(2)]
+    result = VCGLikeAllocator().allocate(
+        tasks=tasks,
+        robots={robot.id: robot for robot in env.robots},
+        nodes=env.nodes,
+        graph=env.graph,
+        scenario=scenario,
+        step=0,
+    )
+    assert result.auction_stats["task_payment_mode"] == "approx_proportional_robot_payment"
+    assert result.auction_stats["task_externality_mode"] == "approx_proportional_robot_payment"
+    for task in tasks:
+        if task.id not in result.task_to_node:
+            continue
+        assert task.metadata["task_payment_mode"] == "approx_proportional_robot_payment"
+        assert task.metadata["task_externality_mode"] == "approx_proportional_robot_payment"
+        assert math.isnan(task.metadata["task_payment"])
+        assert math.isnan(task.metadata["task_externality"])
+        assert task.metadata["approx_task_payment"] >= 0.0
+        assert task.metadata["approx_task_externality"] >= 0.0
+        assert task.externality_estimate == pytest.approx(task.metadata["task_externality_effective"])
+
+
+def test_vcg_like_allocator_can_skip_pricing_during_training(experiment_config) -> None:
+    scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
+    env = SimulationEnvironment(scenario, seed=29)
+    env._refresh_node_statistics()
+    tasks = [_build_long_task("task-a", env.robots[0].id), _build_long_task("task-b", env.robots[1].id)]
+    result = VCGLikeAllocator().allocate(
+        tasks=tasks,
+        robots={robot.id: robot for robot in env.robots},
+        nodes=env.nodes,
+        graph=env.graph,
+        scenario=scenario,
+        step=0,
+        compute_pricing=False,
+    )
+    assert result.auction_stats["robot_payment_mode"] == "skipped_for_training"
+    assert result.auction_stats["task_payment_mode"] == "skipped_for_training"
+    assert result.auction_stats["task_externality_mode"] == "skipped_for_training"
+    assert set(result.task_to_node).issubset({task.id for task in tasks})
+    assert all(payment == 0.0 for payment in result.payments_by_robot.values())
+    assert all(payment == 0.0 for payment in result.payments_by_task.values())
+    assert all(externality == 0.0 for externality in result.externality_by_task.values())
 
 
 def test_no_method_uses_qmix_without_allocation_layer() -> None:

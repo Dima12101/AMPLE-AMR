@@ -93,6 +93,7 @@ class SimulationEnvironment:
         allocator: BaseAllocator,
         policy_time_ms: float = 0.0,
         global_reference_welfare: float | None = None,
+        compute_pricing: bool = True,
     ) -> EnvironmentTransition:
         """Advance the environment by one decision slot."""
 
@@ -115,6 +116,7 @@ class SimulationEnvironment:
             step=self.current_step,
             policy_time_ms=policy_time_ms,
             global_reference_welfare=global_reference_welfare,
+            compute_pricing=compute_pricing,
         )
         self._schedule_allocated_tasks(new_tasks, allocation_result)
         self._refresh_node_statistics()
@@ -143,7 +145,7 @@ class SimulationEnvironment:
         allocator: BaseAllocator,
         explore: bool = False,
         global_reference_episode_welfare: float | None = None,
-    ) -> tuple[list[dict[str, object]], dict[str, object]]:
+    ) -> tuple[list[dict[str, object]], dict[str, object], list[dict[str, object]]]:
         """Run a complete episode under a mode policy and allocator."""
 
         observations, global_state = self.reset(self.seed)
@@ -164,7 +166,7 @@ class SimulationEnvironment:
                 break
         self._drain_remaining_work()
         episode_summary = self._build_episode_summary(step_rows)
-        return step_rows, episode_summary
+        return step_rows, episode_summary, self._build_task_diagnostics()
 
     def build_local_observations(self) -> list[list[float]]:
         """Build local observations for all nodes."""
@@ -579,3 +581,46 @@ class SimulationEnvironment:
             "welfare_loss_vs_global": float(np.mean([row["welfare_loss_vs_global"] for row in step_rows])) if step_rows else 0.0,
         }
         return summary
+
+    def _build_task_diagnostics(self) -> list[dict[str, object]]:
+        """Build chapter-8 task-level diagnostics for assigned tasks."""
+
+        task_rows: list[dict[str, object]] = []
+        for task_id in self.generated_task_ids:
+            task = self.tasks_by_id[task_id]
+            if not task.assigned_node_id:
+                continue
+            latency_ms = (
+                (task.finish_time - task.arrival_time)
+                if task.finish_time is not None
+                else float(task.metadata.get("assignment_latency_ms", 0.0))
+            )
+            task_rows.append(
+                {
+                    "scenario": self.scenario.scenario_name,
+                    "scenario_size": self.scenario.size_name,
+                    "seed": self.seed,
+                    "task_id": task.id,
+                    "robot_id": task.robot_id,
+                    "task_class": task.task_class,
+                    "assigned_node_id": task.assigned_node_id,
+                    "task_payment": task.metadata.get("task_payment", float("nan")),
+                    "task_externality": task.metadata.get("task_externality", float("nan")),
+                    "approx_task_payment": task.metadata.get("approx_task_payment", float("nan")),
+                    "approx_task_externality": task.metadata.get("approx_task_externality", float("nan")),
+                    "task_payment_effective": task.metadata.get("task_payment_effective", 0.0),
+                    "task_externality_effective": task.metadata.get("task_externality_effective", 0.0),
+                    "task_payment_mode": task.metadata.get("task_payment_mode", "unknown"),
+                    "task_externality_mode": task.metadata.get("task_externality_mode", "unknown"),
+                    "task_utility": task.utility,
+                    "task_cost": task.cost,
+                    "net_contribution": task.welfare_contribution,
+                    "latency_ms": latency_ms,
+                    "deadline_ms": task.deadline_ms,
+                    "deadline_violated": task.status == "violated",
+                    "node_utilization_at_assignment": task.metadata.get("node_utilization_at_assignment", float("nan")),
+                    "queue_length_at_assignment": task.metadata.get("queue_length_at_assignment", float("nan")),
+                    "status": task.status,
+                }
+            )
+        return task_rows

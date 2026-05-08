@@ -51,13 +51,16 @@ class ExperimentRunner:
         if train or (missing_sizes and not eval_only):
             training_history = self._train_qmix(required_sizes, quick=quick, seed=seeds[0] if seeds else 0)
         else:
-            training_history = pd.DataFrame(columns=["size_name", "episode", "reward", "loss", "epsilon"])
+            training_history = pd.DataFrame(
+                columns=["size_name", "training_scenario", "episode", "reward", "loss", "epsilon"]
+            )
         if missing_sizes and eval_only and any(METHOD_SPECS[method].uses_qmix for method in methods):
             missing_text = ", ".join(sorted(missing_sizes))
             raise FileNotFoundError(f"Missing QMIX checkpoints for sizes: {missing_text}. Run with --train first.")
 
         step_records: list[dict[str, object]] = []
         episode_records: list[dict[str, object]] = []
+        task_records: list[dict[str, object]] = []
         for scenario_name in scenarios:
             size_names = self._scenario_size_names(scenario_name, scenario_size)
             for size_name in size_names:
@@ -74,7 +77,7 @@ class ExperimentRunner:
                                 allow_missing_checkpoint=not METHOD_SPECS[method].uses_qmix,
                             )
                             environment = SimulationEnvironment(scenario, seed)
-                            raw_steps, episode_summary = environment.run_episode(controller, allocator, explore=False)
+                            raw_steps, episode_summary, task_rows = environment.run_episode(controller, allocator, explore=False)
                             for row in raw_steps:
                                 row["method"] = method
                                 row["mode_profile"] = profile_name
@@ -82,10 +85,15 @@ class ExperimentRunner:
                             episode_summary["method"] = method
                             episode_summary["mode_profile"] = profile_name
                             episode_records.append(episode_summary)
+                            for row in task_rows:
+                                row["method"] = method
+                                row["mode_profile"] = profile_name
+                                task_records.append(row)
 
         raw_steps = pd.DataFrame(step_records)
         episodes = pd.DataFrame(episode_records)
-        saved = save_result_frames(self.results_dir, raw_steps, episodes, training_history)
+        task_diagnostics = pd.DataFrame(task_records)
+        saved = save_result_frames(self.results_dir, raw_steps, episodes, training_history, task_diagnostics)
         outputs["results"] = list(saved.values())
         outputs["plots"] = generate_plots(self.results_dir)
         outputs["tables"] = export_latex_tables(self.results_dir, self.tables_dir)
@@ -125,7 +133,13 @@ class ExperimentRunner:
             ]
             controller_scenario = resolved_training_scenarios[0]
             checkpoint_path = Path(self.experiment_config.qmix.checkpoint_dir) / f"qmix_{size_name}.pt"
-            controller = QMIXModeController(controller_scenario, self.experiment_config.qmix, checkpoint_path, seed)
+            controller = QMIXModeController(
+                controller_scenario,
+                self.experiment_config.qmix,
+                checkpoint_path,
+                seed,
+                load_checkpoint=False,
+            )
             history = controller.train(
                 allocator=allocator,
                 env_factory=lambda episode_seed, scenarios=resolved_training_scenarios, base_seed=seed: SimulationEnvironment(

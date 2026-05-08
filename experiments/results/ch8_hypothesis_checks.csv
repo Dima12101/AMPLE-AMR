@@ -1,0 +1,8 @@
+hypothesis,status,main_metric,comparison,observed_effect,comment
+H1,not_confirmed,social_welfare,fixed_vcg vs fixed_heuristic,0.11611556214861755,"Положительный эффект в 5.7% сопоставлений, n=70."
+H2,confirmed,social_welfare,qmix_heuristic vs fixed_heuristic,109.17871910906675,"Положительный эффект в 100.0% сопоставлений, n=70."
+H3,partially_confirmed,social_welfare,"ample_amr vs {fixed_vcg, qmix_heuristic}",54.48930909935331,Средний выигрыш против одиночных компонентов; доля положительных сравнений 50.0%.
+H4,partially_confirmed,externality_utilization_corr,auction methods / peak vs stable,0.020936608549049864,"Корреляция внешнего эффекта с загрузкой 0.021; peak=0.000, stable=0.000."
+H5,confirmed,drop_rate / p95_latency_ms / social_welfare,ample_amr vs fixed_heuristic in peak_warehouse_load,78.2575231803411,"Улучшения: welfare=210.516, drop=0.014, latency=24.242."
+H6,confirmed,social_welfare / completion_rate / p95_latency_ms,ample_amr vs fixed_heuristic in degradation/failures,36.66255036738515,"Улучшения: welfare=102.838, completion=0.001, latency=7.149."
+H7,not_confirmed,relative_overhead_reduction_c_ample_vs_ample,c_ample_amr vs ample_amr,-0.8639544330948676,"Среднее относительное снижение overhead=-0.864, средняя потеря welfare=11.723."
