@@ -901,14 +901,40 @@ def _plot_mode_distribution(
     ]
     if already_aggregated:
         mode_columns = [column for column in frame.columns if column.endswith("_share") and column.startswith("mode_")]
-    figure, axis = plt.subplots(figsize=(12, 6))
-    if not frame.empty and mode_columns:
-        distribution = frame.copy()
-        distribution["label"] = distribution["scenario"] + "\n" + distribution["method"]
-        distribution = _ordered_frame(distribution).set_index("label")
+    distribution = _ordered_frame(frame.copy()) if not frame.empty else frame.copy()
+    figure_width = max(12.0, 0.45 * len(distribution)) if not distribution.empty and mode_columns else 12.0
+    figure, axis = plt.subplots(figsize=(figure_width, 6))
+    if not distribution.empty and mode_columns:
+        distribution = distribution.reset_index(drop=True)
+        method_labels = distribution["method"].map(METHOD_LABELS).fillna(distribution["method"])
         distribution[mode_columns].plot(kind="bar", stacked=True, ax=axis)
+        tick_positions = np.arange(len(distribution))
+        axis.set_xticks(tick_positions)
+        axis.set_xticklabels(method_labels, rotation=30, ha="right", fontsize=9)
+        axis.set_xlim(-0.5, len(distribution) - 0.5)
+
+        scenario_ticks: list[float] = []
+        scenario_ticklabels: list[str] = []
+        group_start = 0
+        while group_start < len(distribution):
+            scenario_name = distribution.iloc[group_start]["scenario"]
+            group_end = group_start
+            while group_end + 1 < len(distribution) and distribution.iloc[group_end + 1]["scenario"] == scenario_name:
+                group_end += 1
+            scenario_ticks.append((group_start + group_end) / 2)
+            scenario_ticklabels.append(SCENARIO_LABELS.get(scenario_name, scenario_name))
+            if group_end < len(distribution) - 1:
+                axis.axvline(group_end + 0.5, color="0.85", linewidth=1)
+            group_start = group_end + 1
+
+        top_axis = axis.secondary_xaxis("top")
+        top_axis.set_xticks(scenario_ticks)
+        top_axis.set_xticklabels(scenario_ticklabels)
+        top_axis.tick_params(axis="x", length=0, pad=6, labelsize=9)
+        top_axis.spines["top"].set_visible(False)
+        top_axis.set_xlabel("Сценарий", labelpad=8)
     axis.set_title(title)
-    axis.set_xlabel("Сценарий / метод")
+    axis.set_xlabel("Метод")
     axis.set_ylabel("Средняя доля режима" if already_aggregated else "Среднее число узлов")
     figure.tight_layout()
     return _save_plot_multi(figure, [stem, extra_stem] if extra_stem else [stem])
