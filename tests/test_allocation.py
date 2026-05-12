@@ -7,10 +7,10 @@ import math
 import pytest
 
 import ample_amr.allocation as allocation_module
-from ample_amr.allocation import HeuristicAllocator, VCGLikeAllocator, build_candidates, build_node_budgets
+from ample_amr.allocation import HeuristicAllocator, AuctionAllocator, build_candidates, build_node_budgets
 from ample_amr.domain import Task
 from ample_amr.environment import SimulationEnvironment
-from ample_amr.methods import METHOD_SPECS
+from ample_amr.methods import METHOD_SPECS, unique_method_keys
 from ample_amr.utility import estimate_network_time, estimate_processing_time
 
 
@@ -113,13 +113,13 @@ def test_heuristic_assignment_ignores_welfare_during_selection(experiment_config
     assert task.welfare_contribution == pytest.approx(-1.0)
 
 
-def test_vcg_like_allocation_respects_capacity_constraints(experiment_config) -> None:
+def test_auction_allocation_respects_capacity_constraints(experiment_config) -> None:
     scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
     env = SimulationEnvironment(scenario, seed=5)
     env.nodes = [env.nodes[0]]
     env._refresh_node_statistics()
     tasks = [_build_long_task("task-a", env.robots[0].id), _build_long_task("task-b", env.robots[1].id)]
-    result = VCGLikeAllocator().allocate(
+    result = AuctionAllocator().allocate(
         tasks=tasks,
         robots={robot.id: robot for robot in env.robots},
         nodes=env.nodes,
@@ -135,12 +135,12 @@ def test_vcg_like_allocation_respects_capacity_constraints(experiment_config) ->
     assert sum(candidate.effective_gpu for candidate in assigned) <= budgets[env.nodes[0].id].gpu + 1e-9
 
 
-def test_vcg_like_payments_are_nonnegative(experiment_config) -> None:
+def test_auction_payments_are_nonnegative(experiment_config) -> None:
     scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
     env = SimulationEnvironment(scenario, seed=9)
     env._refresh_node_statistics()
     tasks = [_build_long_task("task-a", env.robots[0].id), _build_long_task("task-b", env.robots[1].id)]
-    result = VCGLikeAllocator().allocate(
+    result = AuctionAllocator().allocate(
         tasks=tasks,
         robots={robot.id: robot for robot in env.robots},
         nodes=env.nodes,
@@ -156,7 +156,7 @@ def test_task_externality_payments_are_recorded_for_vcg(experiment_config) -> No
     env = SimulationEnvironment(scenario, seed=17)
     env._refresh_node_statistics()
     tasks = [_build_long_task("task-a", env.robots[0].id), _build_long_task("task-b", env.robots[1].id)]
-    result = VCGLikeAllocator().allocate(
+    result = AuctionAllocator().allocate(
         tasks=tasks,
         robots={robot.id: robot for robot in env.robots},
         nodes=env.nodes,
@@ -176,7 +176,7 @@ def test_task_externality_payments_are_recorded_for_vcg(experiment_config) -> No
             assert task.externality_estimate == pytest.approx(result.externality_by_task[task.id])
 
 
-def test_vcg_like_allocator_falls_back_to_approx_task_externalities_when_exact_mode_is_disabled(
+def test_auction_allocator_falls_back_to_approx_task_externalities_when_exact_mode_is_disabled(
     experiment_config,
     monkeypatch,
 ) -> None:
@@ -185,7 +185,7 @@ def test_vcg_like_allocator_falls_back_to_approx_task_externalities_when_exact_m
     env = SimulationEnvironment(scenario, seed=23)
     env._refresh_node_statistics()
     tasks = [_build_long_task(f"task-{index}", env.robots[index].id) for index in range(2)]
-    result = VCGLikeAllocator().allocate(
+    result = AuctionAllocator().allocate(
         tasks=tasks,
         robots={robot.id: robot for robot in env.robots},
         nodes=env.nodes,
@@ -207,12 +207,12 @@ def test_vcg_like_allocator_falls_back_to_approx_task_externalities_when_exact_m
         assert task.externality_estimate == pytest.approx(task.metadata["task_externality_effective"])
 
 
-def test_vcg_like_allocator_can_skip_pricing_during_training(experiment_config) -> None:
+def test_auction_allocator_can_skip_pricing_during_training(experiment_config) -> None:
     scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
     env = SimulationEnvironment(scenario, seed=29)
     env._refresh_node_statistics()
     tasks = [_build_long_task("task-a", env.robots[0].id), _build_long_task("task-b", env.robots[1].id)]
-    result = VCGLikeAllocator().allocate(
+    result = AuctionAllocator().allocate(
         tasks=tasks,
         robots={robot.id: robot for robot in env.robots},
         nodes=env.nodes,
@@ -233,9 +233,16 @@ def test_vcg_like_allocator_can_skip_pricing_during_training(experiment_config) 
 def test_no_method_uses_qmix_without_allocation_layer() -> None:
     for method_name, spec in METHOD_SPECS.items():
         if spec.uses_qmix:
-            assert spec.allocator_key in {"heuristic", "vcg_like", "clustered_vcg_like"}
+            assert spec.allocator_key in {"heuristic", "auction", "clustered_auction"}
 
 
 def test_c_ample_amr_does_not_require_cluster_leader_selection() -> None:
     spec = METHOD_SPECS["c_ample_amr"]
-    assert spec.allocator_key == "clustered_vcg_like"
+    assert spec.allocator_key == "clustered_auction"
+
+
+def test_unique_method_keys_keeps_first_occurrence() -> None:
+    assert unique_method_keys(["fixed_heuristic", "fixed_auction", "fixed_heuristic", "fixed_auction"]) == [
+        "fixed_heuristic",
+        "fixed_auction",
+    ]

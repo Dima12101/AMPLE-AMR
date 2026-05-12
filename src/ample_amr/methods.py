@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final, Literal
 
-from .allocation import BaseAllocator, ClusteredVCGLikeAllocator, HeuristicAllocator, VCGLikeAllocator
+from .allocation import BaseAllocator, ClusteredAuctionAllocator, HeuristicAllocator, AuctionAllocator
 from .config import ExperimentConfig, WarehouseScenarioConfig
 from .qmix import FixedModeController, QMIXModeController, RandomModeController
+
+AllocatorKey = Literal["heuristic", "auction", "clustered_auction"]
 
 
 @dataclass(frozen=True)
@@ -16,42 +20,58 @@ class MethodSpec:
 
     key: str
     uses_qmix: bool
-    allocator_key: str
+    allocator_key: AllocatorKey
     fixed_mode: str | None = None
 
 
 METHOD_SPECS: dict[str, MethodSpec] = {
     "fixed_heuristic": MethodSpec(key="fixed_heuristic", uses_qmix=False, allocator_key="heuristic", fixed_mode="normal"),
-    "fixed_auction": MethodSpec(key="fixed_auction", uses_qmix=False, allocator_key="vcg_like", fixed_mode="normal"),
+    "fixed_auction": MethodSpec(key="fixed_auction", uses_qmix=False, allocator_key="auction", fixed_mode="normal"),
     "qmix_heuristic": MethodSpec(key="qmix_heuristic", uses_qmix=True, allocator_key="heuristic"),
-    "ample_amr": MethodSpec(key="ample_amr", uses_qmix=True, allocator_key="vcg_like"),
-    "c_ample_amr": MethodSpec(key="c_ample_amr", uses_qmix=True, allocator_key="clustered_vcg_like"),
+    "ample_amr": MethodSpec(key="ample_amr", uses_qmix=True, allocator_key="auction"),
+    "c_ample_amr": MethodSpec(key="c_ample_amr", uses_qmix=True, allocator_key="clustered_auction"),
     "random_modes_heuristic": MethodSpec(key="random_modes_heuristic", uses_qmix=False, allocator_key="heuristic"),
 }
 
-METHOD_ALIASES = {
-    "fixed_vcg": "fixed_auction",
+ALLOCATOR_BUILDERS: Final[dict[AllocatorKey, Callable[[], BaseAllocator]]] = {
+    "heuristic": lambda: HeuristicAllocator(policy="min_latency"),
+    "auction": AuctionAllocator,
+    "clustered_auction": ClusteredAuctionAllocator,
 }
 
 
-def resolve_method_key(method_key: str) -> str:
-    """Resolve deprecated method aliases to their canonical keys."""
+def get_method_spec(method_key: str) -> MethodSpec:
+    """Return the method spec for a canonical method key."""
 
-    return METHOD_ALIASES.get(method_key, method_key)
+    try:
+        return METHOD_SPECS[method_key]
+    except KeyError as exc:
+        known_methods = ", ".join(sorted(METHOD_SPECS))
+        raise KeyError(f"Unknown method '{method_key}'. Known methods: {known_methods}") from exc
+
+
+def unique_method_keys(method_keys: Iterable[str]) -> list[str]:
+    """Validate method keys and keep only the first occurrence of each method."""
+
+    normalized_keys: list[str] = []
+    seen: set[str] = set()
+    for method_key in method_keys:
+        normalized_key = get_method_spec(method_key).key
+        if normalized_key in seen:
+            continue
+        seen.add(normalized_key)
+        normalized_keys.append(normalized_key)
+    return normalized_keys
 
 
 def build_allocator(method_key: str) -> BaseAllocator:
     """Build the allocator for an experiment method."""
 
-    method_key = resolve_method_key(method_key)
-    spec = METHOD_SPECS[method_key]
-    if spec.allocator_key == "heuristic":
-        return HeuristicAllocator(policy="min_latency")
-    if spec.allocator_key == "vcg_like":
-        return VCGLikeAllocator()
-    if spec.allocator_key == "clustered_vcg_like":
-        return ClusteredVCGLikeAllocator()
-    raise KeyError(f"Unknown allocator key '{spec.allocator_key}'")
+    spec = get_method_spec(method_key)
+    try:
+        return ALLOCATOR_BUILDERS[spec.allocator_key]()
+    except KeyError as exc:
+        raise KeyError(f"Unknown allocator key '{spec.allocator_key}'") from exc
 
 
 def build_mode_controller(
@@ -63,9 +83,8 @@ def build_mode_controller(
 ) -> FixedModeController | RandomModeController | QMIXModeController:
     """Create the appropriate node mode controller for a method."""
 
-    method_key = resolve_method_key(method_key)
-    spec = METHOD_SPECS[method_key]
-    if method_key == "random_modes_heuristic":
+    spec = get_method_spec(method_key)
+    if spec.key == "random_modes_heuristic":
         return RandomModeController(list(scenario.operation_modes), seed + scenario.random_mode_baseline_seed_offset)
     if spec.fixed_mode is not None:
         return FixedModeController(spec.fixed_mode)

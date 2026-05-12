@@ -1466,10 +1466,10 @@ def _evaluate_h2(summary_by_seed: pd.DataFrame) -> dict[str, object]:
 
 
 def _evaluate_h3(summary_by_seed: pd.DataFrame) -> dict[str, object]:
-    effect_vcg, share_vcg, _ = _mean_effect(summary_by_seed, "ample_amr", "fixed_auction", "social_welfare")
+    effect_auction, share_auction, _ = _mean_effect(summary_by_seed, "ample_amr", "fixed_auction", "social_welfare")
     effect_qmix, share_qmix, _ = _mean_effect(summary_by_seed, "ample_amr", "qmix_heuristic", "social_welfare")
-    effect = _nanmean([effect_vcg, effect_qmix])
-    share = _nanmean([share_vcg, share_qmix])
+    effect = _nanmean([effect_auction, effect_qmix])
+    share = _nanmean([share_auction, share_qmix])
     return {
         "hypothesis": "H3",
         "status": _status_from_effect(effect, share),

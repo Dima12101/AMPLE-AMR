@@ -9,7 +9,7 @@ import pandas as pd
 
 from .config import ExperimentConfig, OperationModeConfig, WarehouseScenarioConfig
 from .environment import SimulationEnvironment
-from .methods import METHOD_SPECS, build_allocator, build_mode_controller, resolve_method_key
+from .methods import MethodSpec, build_allocator, build_mode_controller, get_method_spec, unique_method_keys
 from .outputs import export_latex_tables, generate_plots, save_result_frames
 from .qmix import QMIXModeController
 from .utils import ensure_directory
@@ -38,7 +38,8 @@ class ExperimentRunner:
     ) -> dict[str, list[Path] | Path]:
         """Run the requested experiment workflow."""
 
-        methods = list(dict.fromkeys(resolve_method_key(method) for method in methods))
+        methods = unique_method_keys(methods)
+        method_specs = {method: get_method_spec(method) for method in methods}
         outputs: dict[str, list[Path] | Path] = {}
         if plot_only or export_latex_only:
             if plot_only:
@@ -47,7 +48,7 @@ class ExperimentRunner:
                 outputs["tables"] = export_latex_tables(self.results_dir, self.tables_dir)
             return outputs
 
-        required_sizes = self._required_qmix_sizes(methods, scenarios, scenario_size, quick)
+        required_sizes = self._required_qmix_sizes(method_specs, scenarios, scenario_size, quick)
         missing_sizes = self._missing_qmix_sizes(required_sizes)
         if train or (missing_sizes and not eval_only):
             training_history = self._train_qmix(required_sizes, quick=quick, seed=seeds[0] if seeds else 0)
@@ -55,7 +56,7 @@ class ExperimentRunner:
             training_history = pd.DataFrame(
                 columns=["size_name", "training_scenario", "episode", "reward", "loss", "epsilon"]
             )
-        if missing_sizes and eval_only and any(METHOD_SPECS[method].uses_qmix for method in methods):
+        if missing_sizes and eval_only and any(spec.uses_qmix for spec in method_specs.values()):
             missing_text = ", ".join(sorted(missing_sizes))
             raise FileNotFoundError(f"Missing QMIX checkpoints for sizes: {missing_text}. Run with --train first.")
 
@@ -68,6 +69,7 @@ class ExperimentRunner:
                 resolved = self.experiment_config.resolve_scenario(scenario_name, size_override=size_name, quick=quick)
                 for profile_name, scenario in self._iter_scenario_profiles(resolved):
                     for method in methods:
+                        spec = method_specs[method]
                         allocator = build_allocator(method)
                         for seed in seeds:
                             controller = build_mode_controller(
@@ -75,7 +77,7 @@ class ExperimentRunner:
                                 scenario,
                                 self.experiment_config,
                                 seed,
-                                allow_missing_checkpoint=not METHOD_SPECS[method].uses_qmix,
+                                allow_missing_checkpoint=not spec.uses_qmix,
                             )
                             environment = SimulationEnvironment(scenario, seed)
                             raw_steps, episode_summary, task_rows = environment.run_episode(controller, allocator, explore=False)
@@ -102,12 +104,12 @@ class ExperimentRunner:
 
     def _required_qmix_sizes(
         self,
-        methods: list[str],
+        method_specs: dict[str, MethodSpec],
         scenarios: list[str],
         scenario_size: str | None,
         quick: bool,
     ) -> set[str]:
-        if not any(METHOD_SPECS[method].uses_qmix for method in methods):
+        if not any(spec.uses_qmix for spec in method_specs.values()):
             return set()
         sizes: set[str] = set()
         for scenario_name in scenarios:

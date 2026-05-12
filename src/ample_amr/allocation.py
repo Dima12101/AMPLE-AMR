@@ -363,11 +363,11 @@ class SolverOutcome:
     pruned_states: int
 
 
-class VCGLikeAllocator(BaseAllocator):
-    """Deterministic branch-and-bound allocator with VCG-like pricing."""
+class AuctionAllocator(BaseAllocator):
+    """Deterministic branch-and-bound auction allocator with VCG-like pricing."""
 
     def __init__(self) -> None:
-        self.name = "vcg_like"
+        self.name = "auction"
 
     def allocate(
         self,
@@ -611,12 +611,12 @@ class VCGLikeAllocator(BaseAllocator):
         return compensation
 
 
-class ClusteredVCGLikeAllocator(BaseAllocator):
-    """Clustered local VCG-like allocator without leader selection."""
+class ClusteredAuctionAllocator(BaseAllocator):
+    """Clustered local auction allocator without leader selection."""
 
     def __init__(self) -> None:
-        self.name = "clustered_vcg_like"
-        self.local_allocator = VCGLikeAllocator()
+        self.name = "clustered_auction"
+        self.local_allocator = AuctionAllocator()
 
     def allocate(
         self,

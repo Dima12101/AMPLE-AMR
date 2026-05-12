@@ -240,7 +240,6 @@ pytest -q
   domain, while the AMPLE-AMR formulation itself is broader than this domain.
 - The default heuristic baseline is `min_latency`, while social welfare is
   evaluated after assignment.
-- `fixed_vcg` remains accepted as a deprecated alias for `fixed_auction`.
 - The VCG-like allocator is deterministic for a fixed seed.
 - Task-level externalities are intended for CSV diagnostics and dissertation
   analysis rather than as standalone market payments.
