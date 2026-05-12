@@ -25,7 +25,7 @@ def test_add_relative_metrics_keeps_mode_profiles_separate() -> None:
                 "aggressive_bias": (30.0, 33.0, 39.0),
             }.items()
             for method, welfare in zip(
-                ["fixed_heuristic", "fixed_vcg", "ample_amr"],
+                ["fixed_heuristic", "fixed_auction", "ample_amr"],
                 welfare_triplet,
                 strict=True,
             )

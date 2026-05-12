@@ -34,9 +34,9 @@ The benchmark matrix includes:
 
 | Method | Node modes | Allocation layer |
 | --- | --- | --- |
-| `fixed_heuristic` | fixed (`normal`) | heuristic (`greedy_net_welfare`) |
-| `fixed_vcg` | fixed (`normal`) | VCG-like |
-| `qmix_heuristic` | QMIX | heuristic (`greedy_net_welfare`) |
+| `fixed_heuristic` | fixed (`normal`) | heuristic (`min_latency`) |
+| `fixed_auction` | fixed (`normal`) | auction / VCG-like SW optimizer |
+| `qmix_heuristic` | QMIX | heuristic (`min_latency`) |
 | `ample_amr` | QMIX | VCG-like |
 | `c_ample_amr` | QMIX | clustered VCG-like |
 | `random_modes_heuristic` | random | heuristic |
@@ -127,7 +127,7 @@ python3 main_run_experiments.py \
   --config configs/warehouse_experiments.yaml \
   --quick \
   --seeds 0 \
-  --methods fixed_heuristic fixed_vcg qmix_heuristic ample_amr c_ample_amr \
+  --methods fixed_heuristic fixed_auction qmix_heuristic ample_amr c_ample_amr \
   --scenarios stable_warehouse_load peak_warehouse_load heterogeneous_edge_nodes \
               network_degradation edge_node_failures scalability_sweep \
               clustered_vs_global sensitivity_operation_modes
@@ -140,7 +140,7 @@ python3 main_run_experiments.py \
   --config configs/warehouse_experiments.yaml \
   --train \
   --seeds 0 1 2 3 4 \
-  --methods fixed_heuristic fixed_vcg qmix_heuristic ample_amr c_ample_amr \
+  --methods fixed_heuristic fixed_auction qmix_heuristic ample_amr c_ample_amr \
   --scenarios stable_warehouse_load peak_warehouse_load heterogeneous_edge_nodes \
               network_degradation edge_node_failures scalability_sweep \
               clustered_vs_global sensitivity_operation_modes
@@ -238,7 +238,9 @@ pytest -q
 
 - The framework is oriented toward dissertation validation in a **warehouse AMR**
   domain, while the AMPLE-AMR formulation itself is broader than this domain.
-- The default heuristic baseline is `greedy_net_welfare`.
+- The default heuristic baseline is `min_latency`, while social welfare is
+  evaluated after assignment.
+- `fixed_vcg` remains accepted as a deprecated alias for `fixed_auction`.
 - The VCG-like allocator is deterministic for a fixed seed.
 - Task-level externalities are intended for CSV diagnostics and dissertation
   analysis rather than as standalone market payments.

@@ -2,8 +2,8 @@ defaults:
   slot_duration_ms: 100
   episode_steps: 80
   quick_episode_steps: 12
-  queue_horizon_ms: 400.0
-  queue_reservation_factor: 0.3
+  queue_horizon_ms: 350.0
+  queue_reservation_factor: 0.2
   robot_speed_range_mps: [1.5, 2.0]
   robot_working_speed_range_mps: [0.5, 1.5]
   robot_payload_range_kg: [100.0, 150.0]
@@ -68,9 +68,9 @@ operation_modes:
     memory_exposure: 0.30
     gpu_exposure: 0.30
   normal:
-    cpu_exposure: 0.60
-    memory_exposure: 0.60
-    gpu_exposure: 0.60
+    cpu_exposure: 0.55
+    memory_exposure: 0.55
+    gpu_exposure: 0.55
   aggressive:
     cpu_exposure: 0.90
     memory_exposure: 0.90
@@ -189,7 +189,7 @@ scenarios:
   stable_warehouse_load:
     default_size: Warehouse-M
     episode_steps: 80
-    arrival_rate_per_robot: 0.22
+    arrival_rate_per_robot: 0.24
     scenario_group: stable
     task_mix:
       obstacle_detection: 0.22
@@ -206,10 +206,10 @@ scenarios:
   peak_warehouse_load:
     default_size: Warehouse-M
     episode_steps: 90
-    arrival_rate_per_robot: 0.18
-    peak_spike_multiplier: 3.0
+    arrival_rate_per_robot: 0.20
+    peak_spike_multiplier: 4.0
     peak_start_step: 20
-    peak_duration_steps: 30
+    peak_duration_steps: 36
     scenario_group: peak
     heterogeneous_node_mix:
       Edge-S: 0.35
@@ -219,7 +219,7 @@ scenarios:
   heterogeneous_edge_nodes:
     default_size: Warehouse-M+
     episode_steps: 80
-    arrival_rate_per_robot: 0.20
+    arrival_rate_per_robot: 0.21
     scenario_group: heterogeneous
     heterogeneous_node_mix:
       Edge-S: 0.30
@@ -229,10 +229,10 @@ scenarios:
   network_degradation:
     default_size: Warehouse-M
     episode_steps: 80
-    arrival_rate_per_robot: 0.20
-    degraded_region_fraction: 0.45
+    arrival_rate_per_robot: 0.21
+    degraded_region_fraction: 0.50
     degradation_start_step: 16
-    degradation_duration_steps: 28
+    degradation_duration_steps: 32
     scenario_group: network_degradation
     heterogeneous_node_mix:
       Edge-S: 0.30
@@ -242,10 +242,10 @@ scenarios:
   edge_node_failures:
     default_size: Warehouse-M
     episode_steps: 80
-    arrival_rate_per_robot: 0.20
-    failure_fraction: 0.20
+    arrival_rate_per_robot: 0.21
+    failure_fraction: 0.25
     failure_start_step: 24
-    failure_duration_steps: 24
+    failure_duration_steps: 28
     enable_recovery: true
     scenario_group: failures
     heterogeneous_node_mix:
@@ -256,7 +256,7 @@ scenarios:
   scalability_sweep:
     default_size: Warehouse-S
     episode_steps: 60
-    arrival_rate_per_robot: 0.16
+    arrival_rate_per_robot: 0.17
     scenario_group: scalability
     heterogeneous_node_mix:
       Edge-S: 0.35
@@ -266,7 +266,7 @@ scenarios:
   clustered_vs_global:
     default_size: Warehouse-L
     episode_steps: 70
-    arrival_rate_per_robot: 0.18
+    arrival_rate_per_robot: 0.20
     scenario_group: clustered
     heterogeneous_node_mix:
       Edge-S: 0.25
@@ -276,7 +276,7 @@ scenarios:
   sensitivity_operation_modes:
     default_size: Warehouse-M
     episode_steps: 70
-    arrival_rate_per_robot: 0.20
+    arrival_rate_per_robot: 0.22
     scenario_group: sensitivity
     heterogeneous_node_mix:
       Edge-S: 0.30
@@ -285,11 +285,11 @@ scenarios:
     cluster_target_size: 3
     sensitivity_profiles:
       conservative:
-        safe: 0.85
-        normal: 0.90
-        aggressive: 0.92
-        reserve: 0.88
-        critical: 0.90
+        safe: 0.82
+        normal: 0.86
+        aggressive: 0.88
+        reserve: 0.84
+        critical: 0.86
       default:
         safe: 1.00
         normal: 1.00

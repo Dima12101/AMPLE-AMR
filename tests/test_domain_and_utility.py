@@ -102,5 +102,5 @@ def test_exposed_capacity_changes_correctly_by_operation_mode(experiment_config)
     node.current_operation_mode = "aggressive"
     aggressive_capacity = node.exposed_capacity(scenario.operation_modes)
     assert math.isclose(safe_capacity["cpu"], 0.30)
-    assert math.isclose(normal_capacity["cpu"], 0.60)
+    assert math.isclose(normal_capacity["cpu"], 0.55)
     assert math.isclose(aggressive_capacity["cpu"], 0.90)

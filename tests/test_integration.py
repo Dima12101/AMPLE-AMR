@@ -18,7 +18,7 @@ def test_warehouse_s_quick_benchmark_produces_expected_csv_outputs(
     monkeypatch.chdir(tmp_path)
     runner = ExperimentRunner(experiment_config, config_path)
     runner.run(
-        methods=["fixed_heuristic", "fixed_vcg", "qmix_heuristic", "ample_amr", "c_ample_amr"],
+        methods=["fixed_heuristic", "fixed_auction", "qmix_heuristic", "ample_amr", "c_ample_amr"],
         scenarios=["stable_warehouse_load"],
         seeds=[0],
         scenario_size="Warehouse-S",

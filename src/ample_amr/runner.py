@@ -9,7 +9,7 @@ import pandas as pd
 
 from .config import ExperimentConfig, OperationModeConfig, WarehouseScenarioConfig
 from .environment import SimulationEnvironment
-from .methods import METHOD_SPECS, build_allocator, build_mode_controller
+from .methods import METHOD_SPECS, build_allocator, build_mode_controller, resolve_method_key
 from .outputs import export_latex_tables, generate_plots, save_result_frames
 from .qmix import QMIXModeController
 from .utils import ensure_directory
@@ -38,6 +38,7 @@ class ExperimentRunner:
     ) -> dict[str, list[Path] | Path]:
         """Run the requested experiment workflow."""
 
+        methods = list(dict.fromkeys(resolve_method_key(method) for method in methods))
         outputs: dict[str, list[Path] | Path] = {}
         if plot_only or export_latex_only:
             if plot_only:

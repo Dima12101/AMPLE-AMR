@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["fixed_heuristic", "fixed_vcg", "qmix_heuristic", "ample_amr", "c_ample_amr"],
+        default=["fixed_heuristic", "fixed_auction", "qmix_heuristic", "ample_amr", "c_ample_amr"],
     )
     parser.add_argument(
         "--scenarios",

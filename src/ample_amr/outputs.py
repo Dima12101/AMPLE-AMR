@@ -30,7 +30,7 @@ RESULT_FILES = {
 
 METHOD_ORDER = [
     "fixed_heuristic",
-    "fixed_vcg",
+    "fixed_auction",
     "qmix_heuristic",
     "ample_amr",
     "c_ample_amr",
@@ -50,7 +50,7 @@ SCENARIO_ORDER = [
 
 CORE_CHAPTER_METHODS = [
     "fixed_heuristic",
-    "fixed_vcg",
+    "fixed_auction",
     "qmix_heuristic",
     "ample_amr",
     "c_ample_amr",
@@ -66,7 +66,7 @@ PRIMARY_CHAPTER_SCENARIOS = [
 
 SCALABILITY_CHAPTER_METHODS = ["ample_amr", "c_ample_amr"]
 SENSITIVITY_CHAPTER_METHODS = ["fixed_heuristic", "qmix_heuristic", "ample_amr", "random_modes_heuristic"]
-AUCTION_CHAPTER_METHODS = ["fixed_vcg", "ample_amr", "c_ample_amr"]
+AUCTION_CHAPTER_METHODS = ["fixed_auction", "ample_amr", "c_ample_amr"]
 EXTERNALITY_CHAPTER_SCENARIOS = [
     "stable_warehouse_load",
     "peak_warehouse_load",
@@ -75,7 +75,7 @@ EXTERNALITY_CHAPTER_SCENARIOS = [
 
 METHOD_LABELS = {
     "fixed_heuristic": "Fixed-H",
-    "fixed_vcg": "Fixed-VCG",
+    "fixed_auction": "Fixed-Auction",
     "qmix_heuristic": "QMIX-H",
     "ample_amr": "AMPLE-AMR",
     "c_ample_amr": "C-AMPLE-AMR",
@@ -133,7 +133,7 @@ SUMMARY_METRICS = [
     "graph_cut",
     "welfare_loss_vs_global",
     "relative_welfare_gain_vs_fixed_heuristic",
-    "relative_welfare_gain_vs_fixed_vcg",
+    "relative_welfare_gain_vs_fixed_auction",
     "relative_overhead_reduction_c_ample_vs_ample",
 ]
 
@@ -549,25 +549,25 @@ def _add_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
         .drop_duplicates()
         .rename(columns={"social_welfare": "fixed_heuristic_welfare"})
     )
-    baseline_v = (
-        frame[frame["method"] == "fixed_vcg"][key_columns + ["social_welfare"]]
+    baseline_auction = (
+        frame[frame["method"] == "fixed_auction"][key_columns + ["social_welfare"]]
         .drop_duplicates()
-        .rename(columns={"social_welfare": "fixed_vcg_welfare"})
+        .rename(columns={"social_welfare": "fixed_auction_welfare"})
     )
-    merged = frame.merge(baseline_h, on=key_columns, how="left").merge(baseline_v, on=key_columns, how="left")
+    merged = frame.merge(baseline_h, on=key_columns, how="left").merge(baseline_auction, on=key_columns, how="left")
     merged["relative_welfare_gain_vs_fixed_heuristic"] = merged.apply(
         lambda row: safe_div(row["social_welfare"] - row["fixed_heuristic_welfare"], abs(row["fixed_heuristic_welfare"]))
         if pd.notna(row["fixed_heuristic_welfare"])
         else np.nan,
         axis=1,
     )
-    merged["relative_welfare_gain_vs_fixed_vcg"] = merged.apply(
-        lambda row: safe_div(row["social_welfare"] - row["fixed_vcg_welfare"], abs(row["fixed_vcg_welfare"]))
-        if pd.notna(row["fixed_vcg_welfare"])
+    merged["relative_welfare_gain_vs_fixed_auction"] = merged.apply(
+        lambda row: safe_div(row["social_welfare"] - row["fixed_auction_welfare"], abs(row["fixed_auction_welfare"]))
+        if pd.notna(row["fixed_auction_welfare"])
         else np.nan,
         axis=1,
     )
-    return merged.drop(columns=["fixed_heuristic_welfare", "fixed_vcg_welfare"])
+    return merged.drop(columns=["fixed_heuristic_welfare", "fixed_auction_welfare"])
 
 
 def _add_cluster_relative_metrics(frame: pd.DataFrame) -> pd.DataFrame:
@@ -725,7 +725,7 @@ def _build_ch8_overall_summary(summary_by_seed: pd.DataFrame) -> pd.DataFrame:
         "externality_latency_corr",
         "externality_queue_corr",
         "relative_welfare_gain_vs_fixed_heuristic",
-        "relative_welfare_gain_vs_fixed_vcg",
+        "relative_welfare_gain_vs_fixed_auction",
         "welfare_loss_vs_global",
         "relative_overhead_reduction_c_ample_vs_ample",
     ]
@@ -1018,7 +1018,7 @@ def _plot_payments_by_task_class(
 ) -> list[Path]:
     figure, axis = plt.subplots(figsize=(12, 5))
     if not payments_by_task_class.empty:
-        filtered = payments_by_task_class[payments_by_task_class["method"].isin(["fixed_vcg", "ample_amr", "c_ample_amr"])].copy()
+        filtered = payments_by_task_class[payments_by_task_class["method"].isin(["fixed_auction", "ample_amr", "c_ample_amr"])].copy()
         if not filtered.empty:
             pivot = filtered.pivot_table(index="task_class", columns="method", values="mean_task_payment", aggfunc="mean", fill_value=0.0)
             pivot = pivot.reindex(columns=_ordered_methods(list(pivot.columns)))
@@ -1442,12 +1442,12 @@ def _status_from_effect(mean_effect: float, positive_share: float, strong_thresh
 
 
 def _evaluate_h1(summary_by_seed: pd.DataFrame) -> dict[str, object]:
-    effect, share, count = _mean_effect(summary_by_seed, "fixed_vcg", "fixed_heuristic", "social_welfare")
+    effect, share, count = _mean_effect(summary_by_seed, "fixed_auction", "fixed_heuristic", "social_welfare")
     return {
         "hypothesis": "H1",
         "status": _status_from_effect(effect, share),
         "main_metric": "social_welfare",
-        "comparison": "fixed_vcg vs fixed_heuristic",
+        "comparison": "fixed_auction vs fixed_heuristic",
         "observed_effect": effect,
         "comment": f"Положительный эффект в {share:.1%} сопоставлений, n={count}.",
     }
@@ -1466,7 +1466,7 @@ def _evaluate_h2(summary_by_seed: pd.DataFrame) -> dict[str, object]:
 
 
 def _evaluate_h3(summary_by_seed: pd.DataFrame) -> dict[str, object]:
-    effect_vcg, share_vcg, _ = _mean_effect(summary_by_seed, "ample_amr", "fixed_vcg", "social_welfare")
+    effect_vcg, share_vcg, _ = _mean_effect(summary_by_seed, "ample_amr", "fixed_auction", "social_welfare")
     effect_qmix, share_qmix, _ = _mean_effect(summary_by_seed, "ample_amr", "qmix_heuristic", "social_welfare")
     effect = _nanmean([effect_vcg, effect_qmix])
     share = _nanmean([share_vcg, share_qmix])
@@ -1474,7 +1474,7 @@ def _evaluate_h3(summary_by_seed: pd.DataFrame) -> dict[str, object]:
         "hypothesis": "H3",
         "status": _status_from_effect(effect, share),
         "main_metric": "social_welfare",
-        "comparison": "ample_amr vs {fixed_vcg, qmix_heuristic}",
+        "comparison": "ample_amr vs {fixed_auction, qmix_heuristic}",
         "observed_effect": effect,
         "comment": f"Средний выигрыш против одиночных компонентов; доля положительных сравнений {share:.1%}.",
     }
@@ -1490,7 +1490,7 @@ def _evaluate_h4(task_diagnostics: pd.DataFrame) -> dict[str, object]:
             "observed_effect": np.nan,
             "comment": "Нет task-level diagnostics.",
         }
-    auction = task_diagnostics[task_diagnostics["method"].isin(["fixed_vcg", "ample_amr", "c_ample_amr"])].copy()
+    auction = task_diagnostics[task_diagnostics["method"].isin(["fixed_auction", "ample_amr", "c_ample_amr"])].copy()
     corr = _corr(auction["task_externality_effective"], auction["node_utilization_at_assignment"])
     peak = float(
         auction[auction["scenario"] == "peak_warehouse_load"]["task_externality_effective"].mean()

@@ -127,6 +127,7 @@ def build_candidates(
     graph: NetworkGraph,
     scenario: WarehouseScenarioConfig,
     step: int,
+    require_positive_welfare: bool = True,
 ) -> tuple[dict[str, list[CandidateAssignment]], dict[str, float]]:
     """Evaluate feasible candidates for each task."""
 
@@ -150,7 +151,7 @@ def build_candidates(
                 continue
             cost = evaluate_cost(task, robot, node, graph, step)
             welfare = utility - cost
-            if welfare <= 0.0:
+            if require_positive_welfare and welfare <= 0.0:
                 continue
             total_latency_ms = estimate_network_time(robot, node, task, graph, step) + node.last_auction_stats.get(
                 "estimated_backlog_ms",
@@ -253,7 +254,7 @@ def select_task_externality_mode(tasks: list[Task], nodes: list[EdgeNode]) -> st
 class HeuristicAllocator(BaseAllocator):
     """Simple baseline allocator under exposed capacity constraints."""
 
-    def __init__(self, policy: str = "greedy_net_welfare") -> None:
+    def __init__(self, policy: str = "min_latency") -> None:
         self.policy = policy
         self.name = f"heuristic:{policy}"
 
@@ -272,7 +273,17 @@ class HeuristicAllocator(BaseAllocator):
         start = perf_counter()
         budgets = build_node_budgets(nodes, scenario)
         tasks_by_id = {task.id: task for task in tasks}
-        candidates, _ = build_candidates(tasks, robots, nodes, graph, scenario, step)
+        # The heuristic baseline ignores welfare during assignment and only
+        # measures welfare after the assignment is fixed.
+        candidates, _ = build_candidates(
+            tasks,
+            robots,
+            nodes,
+            graph,
+            scenario,
+            step,
+            require_positive_welfare=False,
+        )
         assignment_context = build_assignment_context(nodes)
         ordered_tasks = sorted(
             tasks,
@@ -287,13 +298,14 @@ class HeuristicAllocator(BaseAllocator):
                 task.status = "dropped"
                 continue
             if self.policy == "min_latency":
-                chosen = min(task_candidates, key=lambda item: (item.total_latency_ms, -item.welfare, item.node_id))
+                chosen = min(task_candidates, key=lambda item: (item.total_latency_ms, item.node_id))
             elif self.policy == "least_loaded":
                 chosen = max(
                     task_candidates,
                     key=lambda item: (
                         budgets[item.node_id].cpu + budgets[item.node_id].memory + budgets[item.node_id].gpu,
-                        item.welfare,
+                        -item.total_latency_ms,
+                        item.node_id,
                     ),
                 )
             else:

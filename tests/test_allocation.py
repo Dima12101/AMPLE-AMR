@@ -87,6 +87,32 @@ def test_heuristic_allocation_respects_capacity_constraints(experiment_config) -
     assert sum(candidate.effective_gpu for candidate in assigned) <= budgets[env.nodes[0].id].gpu + 1e-9
 
 
+def test_heuristic_assignment_ignores_welfare_during_selection(experiment_config, monkeypatch) -> None:
+    scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
+    env = SimulationEnvironment(scenario, seed=3)
+    env.nodes = [env.nodes[0]]
+    env._refresh_node_statistics()
+    task = _build_long_task("task-a", env.robots[0].id)
+
+    monkeypatch.setattr(allocation_module, "evaluate_utility", lambda *args, **kwargs: 1.0)
+    monkeypatch.setattr(allocation_module, "evaluate_cost", lambda *args, **kwargs: 2.0)
+    monkeypatch.setattr(allocation_module, "estimate_network_time", lambda *args, **kwargs: 5.0)
+    monkeypatch.setattr(allocation_module, "estimate_processing_time", lambda *args, **kwargs: 5.0)
+
+    result = HeuristicAllocator().allocate(
+        tasks=[task],
+        robots={robot.id: robot for robot in env.robots},
+        nodes=env.nodes,
+        graph=env.graph,
+        scenario=scenario,
+        step=0,
+    )
+
+    assert result.task_to_node == {task.id: env.nodes[0].id}
+    assert result.social_welfare == pytest.approx(-1.0)
+    assert task.welfare_contribution == pytest.approx(-1.0)
+
+
 def test_vcg_like_allocation_respects_capacity_constraints(experiment_config) -> None:
     scenario = experiment_config.resolve_scenario("stable_warehouse_load", size_override="Warehouse-S", quick=True)
     env = SimulationEnvironment(scenario, seed=5)
